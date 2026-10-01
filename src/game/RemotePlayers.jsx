@@ -5,6 +5,7 @@ import { Vector3 } from 'three'
 import AnimeCharacter from './AnimeCharacter'
 import { ANIMES, AVATAR_ID, bootsById, characterById } from './config'
 import Aura from './fx/Aura'
+import NameTag from './fx/NameTag'
 import RunFx from './fx/RunFx'
 import { net, useNet } from './multiplayer'
 import PlayerAvatar from './PlayerAvatar'
@@ -46,12 +47,12 @@ function angleTo(a, b) {
  * Another player in the room, shown the way you show yourself: their own
  * Bloxity avatar or the anime they wear, running, jumping, doing the double-jump
  * flip, riding a treadmill or toppling over - with their aura, running effect,
- * glowing footprints and level-up burst. No names or account details are shown.
+ * glowing footprints and level-up burst, with their name floating overhead.
  */
 function RemotePlayer({ id }) {
   const [info, setInfo] = useState(() => {
     const p = net.remotes.get(id)
-    return { anime: p?.anime, avatar: p?.avatar, boots: p?.boots }
+    return { anime: p?.anime, avatar: p?.avatar, boots: p?.boots, name: p?.name, level: p?.level }
   })
   const groupRef = useRef(null)
   const tiltRef = useRef(null)
@@ -79,8 +80,8 @@ function RemotePlayer({ id }) {
     const group = groupRef.current
     if (!p || !group) return
     const dt = Math.min(rawDt, 0.1)
-    if (p.anime !== info.anime || p.avatar !== info.avatar || p.boots !== info.boots) {
-      setInfo({ anime: p.anime, avatar: p.avatar, boots: p.boots })
+    if (p.anime !== info.anime || p.avatar !== info.avatar || p.boots !== info.boots || p.name !== info.name || p.level !== info.level) {
+      setInfo({ anime: p.anime, avatar: p.avatar, boots: p.boots, name: p.name, level: p.level })
     }
 
     // No real position yet (or a bad one): hide rather than glide toward NaN,
@@ -186,6 +187,7 @@ function RemotePlayer({ id }) {
     <>
       <group ref={groupRef}>
         <Aura character={character} boots={boots} motionRef={motionRef} />
+        <NameTag name={info.name} />
         <group ref={tiltRef}>
           {/* The flip pivots round the hips, as for the local player. */}
           <group ref={flipRef} position={[0, FEET, 0]}>

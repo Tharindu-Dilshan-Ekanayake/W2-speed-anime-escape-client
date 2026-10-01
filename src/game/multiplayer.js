@@ -51,10 +51,17 @@ function avatarPayload() {
   return JSON.stringify({ equipped: equipped || {}, proportions: proportions || {} })
 }
 
+/** The player's Bloxity display name (account or guest). */
+function playerName() {
+  const { user, guest } = useBloxityStore.getState()
+  const who = user || guest
+  return who?.displayName || who?.username || 'Player'
+}
+
 function profile() {
   const s = useGame.getState()
   return {
-    name: 'Player',
+    name: playerName(),
     anime: s.equipped || '',
     boots: s.boots || '',
     level: s.level,
@@ -172,8 +179,8 @@ export function startMultiplayer() {
   })
   // ...and when the Bloxity outfit or body sliders change (live, from the portal).
   const unsubscribeAvatar = useBloxityStore.subscribe((s, prev) => {
-    if (net.room && (s.equipped !== prev.equipped || s.proportions !== prev.proportions)) {
-      net.room.send('profile', { avatar: avatarPayload() })
+    if (net.room && (s.equipped !== prev.equipped || s.proportions !== prev.proportions || s.user !== prev.user || s.guest !== prev.guest)) {
+      net.room.send('profile', { avatar: avatarPayload(), name: playerName() })
     }
   })
   return () => {

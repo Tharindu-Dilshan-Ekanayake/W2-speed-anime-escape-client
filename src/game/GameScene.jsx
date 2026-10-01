@@ -117,6 +117,7 @@ export function GameScene() {
 
   return (
     <Canvas
+      flat
       shadows="percentage"
       dpr={Math.min(dpr, typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1)}
       gl={{ antialias: true, powerPreference: 'high-performance' }}

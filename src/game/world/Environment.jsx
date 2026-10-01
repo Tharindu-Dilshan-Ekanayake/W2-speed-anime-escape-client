@@ -48,8 +48,8 @@ const SKY_FRAG = /* glsl */ `
     // Below the horizon, fade to the horizon colour (the fog hides the seam).
     col = mix(col, uHorizon, smoothstep(0.0, -0.2, d.y));
     // A dreamy rose-lilac glow banding the horizon by day, like an anime sky.
-    col += vec3(1.0, 0.55, 0.85) * 0.12 * exp(-pow((d.y - 0.1) * 6.0, 2.0)) * (1.0 - uNight);
-    col += vec3(0.55, 0.7, 1.0) * 0.08 * exp(-pow((d.y - 0.32) * 5.0, 2.0)) * (1.0 - uNight);
+    col += vec3(1.0, 0.8, 0.7) * 0.0 * exp(-pow((d.y - 0.1) * 6.0, 2.0)) * (1.0 - uNight);
+    col += vec3(0.4, 0.7, 1.0) * 0.0 * exp(-pow((d.y - 0.32) * 5.0, 2.0)) * (1.0 - uNight);
     // Sun (or moon at night): a soft disc and a wide glow.
     float s = max(dot(d, normalize(uSunDir)), 0.0);
     col += uSun * (pow(s, 900.0) * 1.6 + pow(s, 12.0) * 0.25);
@@ -224,7 +224,7 @@ export function Environment() {
   )
 
   useEffect(() => {
-    scene.fog = new Fog('#c4ecff', 80, 440)
+    scene.fog = new Fog('#d6ebfa', 120, 440)
     scene.add(target)
     return () => {
       scene.fog = null
@@ -248,20 +248,21 @@ export function Environment() {
       scene.fog.color.lerp(tmp.fog.set(theme.fog), k)
       // Everything past the fog's far edge is fully fogged, so it is never drawn (see the camera's far plane).
       const far = theme.night ? 400 : 440
+      scene.fog.near += ((theme.night ? 60 : 120) - scene.fog.near) * k
       scene.fog.far += (far - scene.fog.far) * k
     }
     if (hemi.current) {
-      hemi.current.color.lerp(tmp.sky.set(theme.night ? '#b8c0ff' : '#e4eeff'), k)
-      hemi.current.groundColor.lerp(tmp.ground.set(theme.night ? '#5a4a7a' : '#9a8aa8'), k)
-      hemi.current.intensity += ((theme.night ? 2.1 : 1.5) - hemi.current.intensity) * k
+      hemi.current.color.lerp(tmp.sky.set(theme.night ? '#b8c0ff' : '#dcecff'), k)
+      hemi.current.groundColor.lerp(tmp.ground.set(theme.night ? '#5a4a7a' : '#7a6a50'), k)
+      hemi.current.intensity += ((theme.night ? 2.1 : 0.85) - hemi.current.intensity) * k
     }
     if (sun.current) {
       const p = runtime.playerPos
       sun.current.position.set(p.x + 30, p.y + 60, p.z + 20)
       target.position.set(p.x, p.y, p.z - 6)
       sun.current.target = target
-      sun.current.intensity += ((theme.night ? 1.9 : 2.2) - sun.current.intensity) * k
-      sun.current.color.lerp(tmp.sun.set(theme.night ? '#d8dcff' : '#fff0d8'), k)
+      sun.current.intensity += ((theme.night ? 1.9 : 2.1) - sun.current.intensity) * k
+      sun.current.color.lerp(tmp.sun.set(theme.night ? '#d8dcff' : '#ffe6c4'), k)
     }
     const air = AIR[themeKeyAt(runtime.stage)] || ['#ffffff', 0.1, 0]
     const am = runtime.airMaterial
@@ -278,7 +279,7 @@ export function Environment() {
       <Clouds />
       <AirParticles />
       <hemisphereLight ref={hemi} args={['#dff2ff', '#7a8a6a', 1.5]} />
-      <ambientLight intensity={0.35} />
+      <ambientLight intensity={0.28} />
       <directionalLight
         ref={sun}
         castShadow
@@ -290,6 +291,7 @@ export function Environment() {
         shadow-camera-bottom={-30}
         shadow-camera-near={1}
         shadow-camera-far={160}
+        shadow-radius={2}
         shadow-bias={-0.0006}
         shadow-normalBias={0.04}
       />
