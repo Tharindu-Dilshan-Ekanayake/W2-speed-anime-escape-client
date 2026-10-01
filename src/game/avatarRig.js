@@ -363,25 +363,35 @@ export function animateRig(rig, motion) {
   }
 
   // --- Walk / run cycle -----------------------------------------------------
-  // Step frequency rises with speed so a sprint doesn't look like a moonwalk.
-  const phase = time * (5 + ratio * 5)
+  // The stride phase is accumulated, so a change of speed never makes the legs
+  // jump, and it quickens with real speed (a sprint isn't a moonwalk).
+  const dt = Math.min(0.1, Math.max(0, time - (rig.lastAnimTime ?? time)))
+  rig.lastAnimTime = time
+  rig.phase = (rig.phase || 0) + dt * (5.5 + speed * 0.45)
+  const phase = rig.phase
   const cycle = Math.sin(phase)
-  const legAmp = 0.85 * ratio
-  const armAmp = 0.7 * ratio
+  // 0 at an easy jog, 1 flat out: the faster, the more the arms sweep back.
+  const fast = Math.min(1, Math.max(0, (speed - 6) / 13))
+  const back = Math.min(1, fast * 1.5) ** 2
+  const legAmp = (0.9 + 0.45 * fast) * ratio
+  const armAmp = 0.85 * (1 - 0.55 * fast) * ratio
 
   // Legs swing in opposition; knees fold on the backswing only.
   swing(rig, 'LegL1', cycle * legAmp)
   swing(rig, 'LegR1', -cycle * legAmp)
-  swing(rig, 'LegL2', Math.max(0, -cycle) * 1.1 * ratio)
-  swing(rig, 'LegR2', Math.max(0, cycle) * 1.1 * ratio)
+  swing(rig, 'LegL2', Math.max(0, -cycle) * 1.3 * ratio)
+  swing(rig, 'LegR2', Math.max(0, cycle) * 1.3 * ratio)
 
-  // Arms counter-swing against the legs.
-  swing(rig, 'ArmL1', -cycle * armAmp)
-  swing(rig, 'ArmR1', cycle * armAmp)
-  swing(rig, 'ArmL2', Math.max(0, cycle) * 0.5 * ratio)
-  swing(rig, 'ArmR2', Math.max(0, -cycle) * 0.5 * ratio)
+  // Arms counter-swing against the legs, then stream back behind at speed
+  // (the anime run), a little out to the sides.
+  swing(rig, 'ArmL1', -cycle * armAmp + 0.9 * back * ratio)
+  swing(rig, 'ArmR1', cycle * armAmp + 0.9 * back * ratio)
+  sway(rig, 'ArmL1', -0.05 - 0.18 * back)
+  sway(rig, 'ArmR1', 0.05 + 0.18 * back)
+  swing(rig, 'ArmL2', Math.max(0, cycle) * 0.55 * ratio)
+  swing(rig, 'ArmR2', Math.max(0, -cycle) * 0.55 * ratio)
 
   // Lean into the run, and bob once per step (twice per full cycle).
-  swing(rig, 'Spine1', -0.14 * ratio)
-  rig.root.position.y = rig.rootRestY + Math.abs(Math.cos(phase)) * 0.18 * ratio
+  swing(rig, 'Spine1', -(0.12 + 0.3 * fast) * ratio)
+  rig.root.position.y = rig.rootRestY + Math.abs(Math.cos(phase)) * 0.16 * ratio
 }

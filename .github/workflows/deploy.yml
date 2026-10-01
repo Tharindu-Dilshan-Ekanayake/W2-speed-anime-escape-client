@@ -1,0 +1,71 @@
+# Build the client and upload it to Bloxity Legion's static hosting.
+#   push to dev  -> dev channel   https://<gameId>.dev.play.bloxity.io
+#   push to main -> prod channel  https://<gameId>.play.bloxity.io
+#
+# Setup (repo -> Settings -> Secrets and variables -> Actions):
+#   secret   LEGION_DEPLOY_TOKEN  the deploy token from My Games (same one the
+#                                 server repo uses - it's per game, not per repo)
+#   variable LEGION_GAME_ID       (optional) defaults to w2-speed-anime-escape
+# Point a browser at the played URL above once this run finishes.
+name: Deploy to Legion
+
+on:
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GAME_ID: ${{ vars.LEGION_GAME_ID || 'w2-speed-anime-escape' }}
+      CHANNEL: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check setup
+        run: |
+          [ -n "${{ secrets.LEGION_DEPLOY_TOKEN }}" ] || { echo "::error::Set the LEGION_DEPLOY_TOKEN secret"; exit 1; }
+          # Legion's channel subdomains: prod has none, dev is ".dev".
+          if [ "$CHANNEL" = dev ]; then echo "SUB=.dev" >> "$GITHUB_ENV"; else echo "SUB=" >> "$GITHUB_ENV"; fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Vite bakes these into the built files, so they're set per channel here
+      # rather than read from .env at runtime. Same game id as the server's
+      # LEGION_GAME_ID; the API/matchmaker hosts follow Legion's fixed pattern.
+      - name: Build
+        env:
+          VITE_GAME_SLUG: ${{ env.GAME_ID }}
+          VITE_BLOXITY_PORTAL_URL: https://bloxity.io
+          VITE_BLOXITY_API_URL: https://api.bloxity.io
+          VITE_API_URL: https://${{ env.GAME_ID }}${{ env.SUB }}.host.bloxity.io
+          VITE_MATCHMAKER_URL: https://play.bloxity.io
+          VITE_LEGION_GAME_ID: ${{ env.GAME_ID }}
+        run: npm run build
+
+      - name: Zip the build
+        run: (cd dist && zip -r ../build.zip .)
+
+      - name: Upload to Legion hosting
+        env:
+          LEGION_DEPLOY_TOKEN: ${{ secrets.LEGION_DEPLOY_TOKEN }}
+        run: |
+          curl -sf -X POST \
+            "https://api.bloxity.io/v1/hosting/games/${GAME_ID}/frontend?channel=${CHANNEL}&version=${GITHUB_SHA}" \
+            -H "Authorization: Bearer $LEGION_DEPLOY_TOKEN" \
+            -H "Content-Type: application/zip" \
+            --data-binary @build.zip
+          echo "Deployed to $CHANNEL: https://${GAME_ID}${SUB}.play.bloxity.io"

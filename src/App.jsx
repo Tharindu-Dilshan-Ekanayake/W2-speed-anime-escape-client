@@ -1,13 +1,19 @@
 import GameScene from './game/GameScene'
-import AuthHUD from './ui/AuthHUD'
-import Controls from './ui/Controls'
+import useGameSystems from './game/useGameSystems'
+import HUD from './ui/HUD'
+import LoadingScreen from './ui/LoadingScreen'
+import Modals from './ui/Modals'
+import TouchControls from './ui/TouchControls'
 
 function App() {
+  useGameSystems()
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-slate-900">
+    <div className="relative h-screen w-screen overflow-hidden" style={{ background: '#0b1630' }}>
       <GameScene />
-      <AuthHUD />
-      <Controls />
+      <TouchControls />
+      <HUD />
+      <Modals />
+      <LoadingScreen />
     </div>
   )
 }

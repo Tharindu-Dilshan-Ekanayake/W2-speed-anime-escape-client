@@ -1,7 +1,7 @@
 import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
-import { Box3, MeshStandardMaterial, Vector3 } from 'three'
+import { Box3, MeshLambertMaterial, Vector3 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 import {
@@ -13,6 +13,7 @@ import {
 } from '../bloxity/avatarAssets'
 import { loadOBJ, loadPartGLB, loadTexture } from '../bloxity/avatarLoader'
 import { useBloxity } from '../bloxity/BloxityContext'
+import { DEFAULT_PROPORTIONS } from '../bloxity/store'
 import {
   animateRig,
   applyPart,
@@ -45,17 +46,24 @@ function fallbackMotion(delta) {
  * whole thing re-assembles when `onAvatarChanged` / `onProportionsChanged` fire, so
  * changing cosmetics in the Bloxity portal updates the character live.
  *
- * @param {{ onReady?: () => void, targetHeight?: number }} props
+ * @param {{ onReady?: () => void, targetHeight?: number, local?: boolean,
+ *   look?: { equipped: object, proportions?: object } }} props
  *   `targetHeight` is the world-space height to fit the avatar into, in the game's
  *   own units. Bloxity authors the rig ~6.4 units tall with the feet at y=0, which is
  *   far bigger than a metric-scale physics capsule, so the model is measured and
  *   rescaled rather than trusted at native size.
+ *   Without `look` it wears the signed-in (or guest) player's own outfit; with it,
+ *   someone else's (another player in the lobby). `local` marks the player's own
+ *   character, which reports its progress to the loading screen.
  */
 export const PlayerAvatar = forwardRef(function PlayerAvatar(
-  { onReady, targetHeight = 1.8, motionRef, ...props },
+  { onReady, targetHeight = 1.8, motionRef, local = false, look, ...props },
   ref,
 ) {
-  const { avatar: equipped, proportions, game } = useBloxity()
+  const bloxity = useBloxity()
+  const { game } = bloxity
+  const equipped = look ? look.equipped : bloxity.avatar
+  const proportions = (look ? look.proportions : bloxity.proportions) || DEFAULT_PROPORTIONS
   const { scene: baseScene } = useGLTF(BASE_BODY_URL)
   const [assembled, setAssembled] = useState(false)
 
@@ -70,11 +78,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
     // The base body ships with an empty texture; give every skinned mesh its own
     // material instance so a skin swap here can't leak into another avatar.
     for (const mesh of collected.skinnedMeshes) {
-      mesh.material = new MeshStandardMaterial({
-        color: 0xffffff,
-        metalness: 0,
-        roughness: 1,
-      })
+      mesh.material = new MeshLambertMaterial({ color: 0xffffff })
     }
 
     if (!collected.skeleton) {
@@ -101,7 +105,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
     // hat/back can be removed rather than stacking up.
     const attached = []
 
-    game.loadingStep('Loading avatar…')
+    if (local) game.loadingStep('Loading your avatar…')
 
     const jobs = []
 
@@ -157,7 +161,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
               if (result.texture) {
                 result.object.traverse((child) => {
                   if (child.isMesh) {
-                    child.material = new MeshStandardMaterial({ map: result.texture })
+                    child.material = new MeshLambertMaterial({ map: result.texture })
                   }
                 })
               }
@@ -183,7 +187,7 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
         object.traverse((child) => child.geometry?.dispose())
       }
     }
-  }, [rig, equipped, game])
+  }, [rig, equipped, game, local])
 
   // --- Proportions -------------------------------------------------------------
   // Applied per frame rather than in an effect: every bone is reset to its rest pose
@@ -218,7 +222,5 @@ export const PlayerAvatar = forwardRef(function PlayerAvatar(
     </group>
   )
 })
-
-useGLTF.preload(BASE_BODY_URL)
 
 export default PlayerAvatar

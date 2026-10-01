@@ -1,23 +1,85 @@
-import { Environment } from '@react-three/drei'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { PerformanceMonitor } from '@react-three/drei'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Physics } from '@react-three/rapier'
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 
 import { useBloxity } from '../bloxity/BloxityContext'
+import { bootStep } from './boot'
+import { GRAVITY } from './config'
 import FollowCamera from './FollowCamera'
-import Ground from './Ground'
+import Footprints from './fx/Footprints'
+import { GlowClock } from './fx/Glow'
+import { LevelUpBursts } from './fx/LevelUp'
+import { Confetti, SpeedPopups } from './fx/Popups'
+import RunFx from './fx/RunFx'
 import Player from './Player'
+import RemotePlayers from './RemotePlayers'
+import { runtime } from './runtime'
+import { useGame } from './store'
+import Environment from './world/Environment'
+import { pendingUploads } from './textures'
+import { precompileScene, warmUp } from './world/warmup'
+import World from './world/World'
 
 /**
- * Fires `onFirstFrame` after the renderer has actually drawn once.
- * `loadingEnd()` should mean "the player can see the game", not "React mounted".
+ * Fires `onReady` once a few frames have really been drawn, so the loading
+ * screen only lifts when the game is on screen.
  */
-function FirstFrameSignal({ onFirstFrame }) {
+function FrameWatch({ onReady, armed }) {
+  const frames = useRef(0)
   const fired = useRef(false)
+  useFrame((state) => {
+    runtime.time = state.clock.elapsedTime
+    if (!armed || fired.current) return
+    frames.current += 1
+    if (frames.current > 8) {
+      fired.current = true
+      onReady()
+    }
+  })
+  return null
+}
+
+/** Compiles the shaders and textures every stage will use, before the game shows. */
+function WarmUp() {
+  const gl = useThree((s) => s.gl)
+  const camera = useThree((s) => s.camera)
+  useEffect(() => {
+    warmUp(gl, camera)
+  }, [gl, camera])
+  return null
+}
+
+/** Pre-compiles the scene's shaders once it has loaded, and again after every move to a new stage. */
+function Precompile() {
+  const gl = useThree((s) => s.gl)
+  const scene = useThree((s) => s.scene)
+  const camera = useThree((s) => s.camera)
+  useEffect(() => {
+    let timer = setTimeout(() => precompileScene(gl, scene, camera), 2500)
+    const unsub = useGame.subscribe((s, prev) => {
+      if (s.zone === prev.zone) return
+      clearTimeout(timer)
+      // Wait for the new stage's pieces to finish mounting.
+      timer = setTimeout(() => precompileScene(gl, scene, camera), 2500)
+    })
+    return () => {
+      clearTimeout(timer)
+      unsub()
+    }
+  }, [gl, scene, camera])
+  return null
+}
+
+/**
+ * Sends new canvas textures (signs, labels) to the GPU one per frame, as soon
+ * as they exist - not in the frame they first come into view, which stalled.
+ */
+function TextureUploader() {
+  const gl = useThree((s) => s.gl)
   useFrame(() => {
-    if (fired.current) return
-    fired.current = true
-    onFirstFrame()
+    const texture = pendingUploads.shift()
+    if (texture) gl.initTexture(texture)
   })
   return null
 }
@@ -25,60 +87,70 @@ function FirstFrameSignal({ onFirstFrame }) {
 export function GameScene() {
   const { game } = useBloxity()
   const playerBodyRef = useRef(null)
-
+  const loaded = useGame((s) => s.loaded)
   const [avatarReady, setAvatarReady] = useState(false)
-  const loadingEnded = useRef(false)
+  // Render resolution: starts crisp and backs off by itself if the frame rate drops.
+  const [dpr, setDpr] = useState(1.5)
+  const ended = useRef(false)
 
-  const handleAvatarReady = useCallback(() => setAvatarReady(true), [])
+  const handleAvatarReady = useCallback(() => {
+    setAvatarReady(true)
+    bootStep('avatar', 'Almost there…')
+  }, [])
 
-  // Only end the loading screen once the avatar has finished assembling *and* a
-  // frame has rendered with it in place.
-  const handleFirstFrame = useCallback(() => {
-    if (loadingEnded.current || !avatarReady) return
-    loadingEnded.current = true
+  const handleFrames = useCallback(() => {
+    if (ended.current) return
+    ended.current = true
+    bootStep('frames', 'Go!')
     game.loadingEnd()
-  }, [avatarReady, game])
-
-  // The first frame usually renders before the avatar finishes downloading, so the
-  // frame callback alone isn't enough — close the loading screen here too.
-  useEffect(() => {
-    if (!avatarReady || loadingEnded.current) return
-    loadingEnded.current = true
-    game.loadingEnd()
-  }, [avatarReady, game])
-
-  useEffect(() => {
-    game.loadingStep('Preparing scene…')
   }, [game])
+
+  useEffect(() => {
+    game.loadingStep('Building the escape…')
+  }, [game])
+
+  // Never hang on the loading screen: if the avatar takes too long, go anyway.
+  useEffect(() => {
+    const id = setTimeout(() => setAvatarReady(true), 12000)
+    return () => clearTimeout(id)
+  }, [])
 
   return (
     <Canvas
-      shadows
-      camera={{ position: [0, 5, 10], fov: 60 }}
-      onCreated={({ gl }) => gl.setClearColor('#87ceeb')}
+      shadows="percentage"
+      dpr={Math.min(dpr, typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1)}
+      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      camera={{ position: [0, 6, 46], fov: 70, near: 0.1, far: 520 }}
+      onCreated={(state) => {
+        bootStep('world', 'Spawning runner…')
+        if (import.meta.env.DEV || import.meta.env.VITE_EXPOSE === '1') window.__three = state
+      }}
     >
-      <hemisphereLight args={['#bfe3ff', '#3f5d3f', 0.8]} />
-      <directionalLight
-        castShadow
-        position={[10, 20, 10]}
-        intensity={1.8}
-        shadow-mapSize={[2048, 2048]}
-      />
-
+      <GlowClock />
+      <WarmUp />
+      <Precompile />
+      <TextureUploader />
+      <Environment />
       <Suspense fallback={null}>
-        <Environment preset="city" />
-        <Physics gravity={[0, -18, 0]}>
-          <Ground />
-          <Player
-            bodyRef={playerBodyRef}
-            position={[0, 3, 8]}
-            onAvatarReady={handleAvatarReady}
-          />
+        <Physics gravity={[0, GRAVITY, 0]} timeStep={1 / 60}>
+          <World />
+          {/* The player (and so their avatar) appears only once Bloxity has said who is playing. */}
+          {loaded && <Player bodyRef={playerBodyRef} onAvatarReady={handleAvatarReady} />}
+          <RemotePlayers />
+          <FollowCamera bodyRef={playerBodyRef} />
         </Physics>
       </Suspense>
-
-      <FollowCamera bodyRef={playerBodyRef} />
-      <FirstFrameSignal onFirstFrame={handleFirstFrame} />
+      <RunFx />
+      <Footprints />
+      <SpeedPopups />
+      <LevelUpBursts />
+      <Confetti />
+      <FrameWatch onReady={handleFrames} armed={avatarReady && loaded} />
+      <PerformanceMonitor
+        flipflops={4}
+        onDecline={() => setDpr((d) => Math.max(0.75, d - 0.25))}
+        onIncline={() => setDpr((d) => Math.min(1.5, d + 0.25))}
+      />
     </Canvas>
   )
 }

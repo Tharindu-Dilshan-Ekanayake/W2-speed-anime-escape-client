@@ -1,49 +1,80 @@
 import { useFrame, useThree } from '@react-three/fiber'
+import { useRapier } from '@react-three/rapier'
 import { useEffect, useRef } from 'react'
 import { Vector3 } from 'three'
+
+import { runtime } from './runtime'
 
 /** How high above the player's origin the camera aims. */
 const LOOK_HEIGHT = 1.4
 
 const MIN_DISTANCE = 3
-const MAX_DISTANCE = 20
-const START_DISTANCE = 8
+const MAX_DISTANCE = 34
+const START_DISTANCE = 11
 
 // Pitch limits, in radians. Stops the camera flipping over the top or sinking
 // under the track.
 const MIN_PITCH = -0.15
 const MAX_PITCH = 1.25
-const START_PITCH = 0.32
+const START_PITCH = 0.3
 
 const DRAG_SENSITIVITY = 0.005
+const TOUCH_SENSITIVITY = 0.008
 const ZOOM_SENSITIVITY = 0.01
+/** A / D turn the camera this fast (radians per second) once fully spun up. */
+const TURN_RATE = 2.6
+/** How quickly a key turn spins up and settles (per second). */
+const TURN_EASE = 10
+/** Keep this far in front of a wall the camera would otherwise sink into. */
+const WALL_PADDING = 0.45
 
-// Higher = snappier. Framerate-independent via the pow() smoothing below.
-const POSITION_SMOOTHING = 4
-const LOOK_SMOOTHING = 8
+/** Field of view at rest, and how much wider it gets flat out (the anime speed kick). */
+const BASE_FOV = 70
+const SPEED_FOV = 14
+/** On a tall (portrait phone) screen the view widens up to this, so the sides aren't cut off. */
+const PORTRAIT_FOV_MAX = 92
+
+/** The vertical field of view at rest for the screen's shape. */
+const baseFov = (aspect) => (aspect >= 1 ? BASE_FOV : Math.min(PORTRAIT_FOV_MAX, BASE_FOV + (1 - aspect) * 40))
+
+/** How quickly the camera eases back out after a wall stops blocking it. */
+const ZOOM_OUT_RATE = 1.5
 
 const _desired = new Vector3()
 const _target = new Vector3()
+const _dir = new Vector3()
+
+/** Widen the view as the player speeds up, so fast feels fast. */
+function speedKick(camera, delta) {
+  const kick = Math.min(1, Math.max(0, (runtime.moveSpeed - 6) / 14))
+  const fov = camera.fov + (baseFov(camera.aspect) + SPEED_FOV * kick - camera.fov) * Math.min(1, delta * 3)
+  if (Math.abs(fov - camera.fov) > 0.01) {
+    camera.fov = fov
+    camera.updateProjectionMatrix()
+  }
+}
 
 /**
- * Third-person orbit camera.
+ * Third-person orbit camera, Roblox style.
  *
- * Trails the player's rigid body, easing both position and look-at target.
- * Right-click drag orbits, the mouse wheel zooms.
+ * Right-click drag (or a one-finger drag on the right half of a touch screen)
+ * orbits, the mouse wheel zooms. A ray from the player to the camera pulls it in
+ * front of walls, so it never looks through the stage corridors.
  *
- * Reads the Rapier body directly rather than React state - the body is the
- * authoritative transform and updates every physics step, not every render.
+ * Must be rendered inside <Physics> (it ray-casts against the colliders).
  *
  * @param {{ bodyRef: React.MutableRefObject<any> }} props
  */
 export function FollowCamera({ bodyRef }) {
   const camera = useThree((s) => s.camera)
   const gl = useThree((s) => s.gl)
+  const { rapier, world } = useRapier()
 
-  // Spherical offset from the player. A ref, not state: pointer events write to it
-  // every mousemove and the frame loop reads it - re-rendering would be wasteful.
   const orbit = useRef({ yaw: 0, pitch: START_PITCH, distance: START_DISTANCE })
-  const lookAt = useRef(new Vector3())
+  /** Current (possibly wall-shortened) camera distance. */
+  const zoom = useRef(START_DISTANCE)
+  /** Current A / D turn rate, eased so a tap nudges and a hold swings round. */
+  const turn = useRef(0)
   const initialised = useRef(false)
 
   useEffect(() => {
@@ -68,7 +99,6 @@ export function FollowCamera({ bodyRef }) {
       const dy = e.clientY - lastY
       lastX = e.clientX
       lastY = e.clientY
-
       const o = orbit.current
       o.yaw -= dx * DRAG_SENSITIVITY
       o.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, o.pitch + dy * DRAG_SENSITIVITY))
@@ -81,16 +111,11 @@ export function FollowCamera({ bodyRef }) {
     }
 
     const onWheel = (e) => {
-      // Without this the page scrolls behind the canvas.
       e.preventDefault()
       const o = orbit.current
-      o.distance = Math.min(
-        MAX_DISTANCE,
-        Math.max(MIN_DISTANCE, o.distance + e.deltaY * ZOOM_SENSITIVITY),
-      )
+      o.distance = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, o.distance + e.deltaY * ZOOM_SENSITIVITY))
     }
 
-    // Right-dragging otherwise opens the browser context menu mid-orbit.
     const onContextMenu = (e) => e.preventDefault()
 
     el.addEventListener('pointerdown', onPointerDown)
@@ -98,7 +123,6 @@ export function FollowCamera({ bodyRef }) {
     el.addEventListener('pointerup', endDrag)
     el.addEventListener('pointercancel', endDrag)
     el.addEventListener('contextmenu', onContextMenu)
-    // passive:false is required for preventDefault() on wheel to take effect.
     el.addEventListener('wheel', onWheel, { passive: false })
 
     return () => {
@@ -114,32 +138,66 @@ export function FollowCamera({ bodyRef }) {
   useFrame((_state, delta) => {
     const body = bodyRef.current
     if (!body) return
+    const o = orbit.current
 
-    const pos = body.translation()
-    _target.set(pos.x, pos.y, pos.z)
+    // Teleports snap the camera behind the player.
+    if (runtime.cameraYaw !== null) {
+      o.yaw = runtime.cameraYaw
+      runtime.cameraYaw = null
+      initialised.current = false
+    }
+    // A / D swing the camera; W then runs the new way, so holding W + A curves left.
+    turn.current += (runtime.turnInput - turn.current) * Math.min(1, TURN_EASE * delta)
+    if (Math.abs(turn.current) > 0.001) o.yaw -= turn.current * TURN_RATE * delta
 
-    // Spherical -> cartesian. yaw 0 puts the camera behind the player on +Z.
-    const { yaw, pitch, distance } = orbit.current
-    const horizontal = Math.cos(pitch) * distance
-    _desired.set(
-      _target.x + Math.sin(yaw) * horizontal,
-      _target.y + Math.sin(pitch) * distance + LOOK_HEIGHT,
-      _target.z + Math.cos(yaw) * horizontal,
-    )
-
-    if (!initialised.current) {
-      // Avoid a long swoop in from wherever the default camera started.
-      camera.position.copy(_desired)
-      lookAt.current.copy(_target).setY(_target.y + LOOK_HEIGHT)
-      initialised.current = true
+    // Touch orbit deltas from TouchControls.
+    if (runtime.orbitDelta.x || runtime.orbitDelta.y) {
+      o.yaw -= runtime.orbitDelta.x * TOUCH_SENSITIVITY
+      o.pitch = Math.min(MAX_PITCH, Math.max(MIN_PITCH, o.pitch + runtime.orbitDelta.y * TOUCH_SENSITIVITY))
+      runtime.orbitDelta.x = 0
+      runtime.orbitDelta.y = 0
     }
 
-    // 1 - pow(x, delta) keeps the easing rate consistent across framerates.
-    camera.position.lerp(_desired, 1 - Math.pow(0.001, delta * (POSITION_SMOOTHING / 10)))
+    const pos = body.translation()
+    _target.set(pos.x, pos.y + LOOK_HEIGHT, pos.z)
 
-    _target.y += LOOK_HEIGHT
-    lookAt.current.lerp(_target, 1 - Math.pow(0.001, delta * (LOOK_SMOOTHING / 10)))
-    camera.lookAt(lookAt.current)
+    // Spherical -> cartesian. yaw 0 puts the camera behind the player on +Z.
+    const horizontal = Math.cos(o.pitch) * o.distance
+    _desired.set(
+      _target.x + Math.sin(o.yaw) * horizontal,
+      _target.y + Math.sin(o.pitch) * o.distance,
+      _target.z + Math.cos(o.yaw) * horizontal,
+    )
+
+    // Pull in front of any wall between the player and the camera.
+    _dir.subVectors(_desired, _target)
+    const length = _dir.length()
+    let blocked = false
+    if (length > 0.001) {
+      _dir.divideScalar(length)
+      const ray = new rapier.Ray(_target, _dir)
+      const hit = world.castRay(ray, length, true, undefined, undefined, undefined, body)
+      if (hit && hit.timeOfImpact < length) {
+        const safe = Math.max(0.5, hit.timeOfImpact - WALL_PADDING)
+        _desired.copy(_target).addScaledVector(_dir, safe)
+        blocked = true
+      }
+    }
+
+    // Rigid follow like Roblox's camera: at high walk speeds any positional easing
+    // leaves the player metres ahead of the frame. Only zoom-in from a wall eases out.
+    if (!initialised.current || blocked) {
+      initialised.current = true
+      zoom.current = _desired.distanceTo(_target)
+    } else if (length <= zoom.current) {
+      zoom.current = length
+    } else {
+      zoom.current += (length - zoom.current) * (1 - Math.pow(0.001, delta * ZOOM_OUT_RATE))
+      _desired.copy(_target).addScaledVector(_dir, Math.min(length, zoom.current))
+    }
+    camera.position.copy(_desired)
+    camera.lookAt(_target)
+    speedKick(camera, delta)
   })
 
   return null
