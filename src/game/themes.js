@@ -13,8 +13,8 @@
  */
 export const THEMES = {
   lobby: {
-    sky: ['#5a8cff', '#ffd8f2'],
-    fog: '#ffd8f2',
+    sky: ['#2f8ff0', '#d6ebfa'],
+    fog: '#d6ebfa',
     floor: '#aab4ff',
     floor2: '#8fe36b',
     pattern: 'diamond',
@@ -27,7 +27,7 @@ export const THEMES = {
     sun: '#fff6d0',
   },
   sakura: {
-    sky: ['#6a8cff', '#ffcfe8'],
+    sky: ['#3a95f0', '#ffe0ee'],
     fog: '#ffd6ea',
     floor: '#aab4ff',
     floor2: '#8fe36b',
@@ -40,8 +40,8 @@ export const THEMES = {
     props: ['sakura', 'cliffs', 'torii'],
   },
   bamboo: {
-    sky: ['#4fb8ff', '#e6ffd8'],
-    fog: '#d8ffe0',
+    sky: ['#2fa0ff', '#d4f4ff'],
+    fog: '#d4f4ff',
     floor: '#c8d88a',
     floor2: '#8fd36b',
     pattern: 'planks',
@@ -53,7 +53,7 @@ export const THEMES = {
     props: ['bamboo', 'islands', 'lanterns'],
   },
   desert: {
-    sky: ['#7a8cff', '#ffd2a0'],
+    sky: ['#3a9cf0', '#ffe2b8'],
     fog: '#ffd9b0',
     floor: '#f2c79a',
     floor2: '#aab4ff',
@@ -93,7 +93,7 @@ export const THEMES = {
     glowTop: true,
   },
   ice: {
-    sky: ['#7a9cff', '#f0eaff'],
+    sky: ['#3f9af0', '#eef2ff'],
     fog: '#eee8ff',
     floor: '#dff4ff',
     floor2: '#9fd8ff',
