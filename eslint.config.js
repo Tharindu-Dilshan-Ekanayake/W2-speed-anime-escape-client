@@ -17,5 +17,14 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // React Three Fiber mutates three.js objects (uniforms, matrices) inside
+      // useFrame by design; these React-compiler checks flag that idiom.
+      'react-hooks/immutability': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/purity': 'off',
+      // Shared helpers live next to the components that use them.
+      'react-refresh/only-export-components': 'warn',
+    },
   },
 ])
